@@ -56,6 +56,7 @@ def describe_bmg_singer():
     bgm_singer_set = set(bgm_singer)
     print(len(bgm_song_set))
     print(len(bgm_singer_set))
+    print(max(bgm_singer))
 
 
 def covariance():

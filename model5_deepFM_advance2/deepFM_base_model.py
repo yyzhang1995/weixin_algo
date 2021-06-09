@@ -14,28 +14,9 @@ ACTIONS = ['read_comment', 'like', 'click_avatar', 'forward']
 SPARSE_FEATURES = ['userid', 'feedid', 'authorid', 'bgm_song_id', 'bgm_singer_id']
 DENSE_FEATURES = ['videoplayseconds']
 
-class DeepFMBase(nn.Module):
-    def __init__(self, feature_size, dense_feature_num, embedding_size, deepnet):
-        """
-        前dense_feature_num个变量都属于dense变量, 其余变量为稀疏变量
-        :param feature_size: 列表, 值为1表示dense变量,否则为稀疏变量的相异元素个数
-        :param dense_feature_num:
-        :param embedding_size:
-        :param deepnet:
-        """
-        super(DeepFMBase, self).__init__()
-        self.field_size = len(feature_size)
-        first_order_dense = nn.ModuleList([
-            nn.Linear(1, embedding_size) for _ in range(dense_feature_num)
-        ])
-        first_order_sparse = nn.ModuleList([
-            nn.Embedding(feature_size_sparse, embedding_size) for feature_size_sparse in feature_size[dense_feature_num: ]
-        ])
-        self.first_order_embedding = first_order_dense.extend(first_order_sparse)
-        # 写到此
-        self.embedding_order_one = nn.ModuleList(
-            [nn.Linear()]
-        )
+class WideDeepNet(nn.Module):
+    def __init__(self, wide_input_dim, deepnet):
+        super(WideDeepNet, self).__init__()
         self.deepnet = deepnet
         self.widenet = nn.Linear(in_features=wide_input_dim, out_features=1)
 

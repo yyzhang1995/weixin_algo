@@ -102,6 +102,7 @@ SPARSE_FEATURES = ['feedid', 'authorid', 'bgm_song_id', 'bgm_singer_id']
 DENSE_FEATURES = ['videoplayseconds']
 USER_ACTION_FEAT = ['userid', 'feedid', 'date_']
 
+
 def generate_train_data_file(behavior, user_action, feed_info):
     OUTPUT_FILE = DATA_DESTINATION + ('train_data_for_%s.csv' % behavior)
 

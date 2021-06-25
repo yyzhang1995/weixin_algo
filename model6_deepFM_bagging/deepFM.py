@@ -7,10 +7,13 @@ from tqdm import tqdm
 from deepctr_torch.inputs import SparseFeat, DenseFeat, get_feature_names
 from deepctr_torch.models.deepfm import *
 from deepctr_torch.models.basemodel import *
+from utils import shuffle_k_fold
+
 
 # 比赛数据集路径
 ROOT_PATH = "./"
-DATASET_PATH = "../dataset/"
+DATASET_PATH = "./datasets/"
+RESULT_PATH = "./results/"
 # 训练集
 USER_ACTION = DATASET_PATH + "user_action.csv"
 FEED_INFO = DATASET_PATH + "feed_info.csv"
@@ -20,24 +23,27 @@ TEST_FILE = DATASET_PATH + "test_a.csv"
 # 初赛待预测行为列表
 ACTION_LIST = ["read_comment", "like", "click_avatar", "forward"]
 FEA_COLUMN_LIST = ["read_comment", "like", "click_avatar", "forward", "comment", "follow", "favorite"]
-FEA_FEED_LISTs = {'read_comment': ['feedid', 'authorid', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
-                                   'machine_tag_list', 'manual_tag_list', 'machine_keyword_list'],
-                  'like': ['feedid', 'authorid', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
-                           'machine_tag_list', 'manual_tag_list'],
-                  'click_avatar': ['feedid', 'authorid', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
-                                   'machine_tag_list', 'manual_tag_list', 'machine_keyword_list', 'manual_keyword_list'],
-                  'forward': ['feedid', 'authorid', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
-                              'machine_tag_list', 'manual_tag_list', 'machine_keyword_list']}
-embedding_dims = {'read_comment': 4, 'like': 4, 'click_avatar': 4, 'forward': 4}
-dnn_hidden_units = {'read_comment': (256, 128), 'like': (256, 128),
-                    'click_avatar': (256, 128), 'forward': (256, 128)}
-epochs = {'read_comment': 2, 'like': 2, 'click_avatar': 2, 'forward': 2}
+# FEA_FEED_LISTs = {'read_comment': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list', 'machine_keyword_list'],
+#                   'like': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list'],
+#                   'click_avatar': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list'],
+#                   'forward': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list', 'machine_keyword_list']}
+# embedding_dims = {'read_comment': 2, 'like': 2, 'click_avatar': 4, 'forward': 4}
+# dnn_hidden_units = {'read_comment': (512, 256, 128), 'like': (256, 128),
+#                     'click_avatar': (256, 128), 'forward': (512, 256)}
+# feed_embed_feat_num = 2
 # 负样本下采样比例(负样本:正样本)
 # ACTION_SAMPLE_RATE = {"read_comment": 5, "like": 5, "click_avatar": 5, "forward": 10, "comment": 10, "follow": 10,
 #                       "favorite": 10}
 
+__all__ = ['train_deepfm']
+
 
 class MyBaseModel(BaseModel):
+
     def fit(self, x=None, y=None, batch_size=None, epochs=1, verbose=1, initial_epoch=0, validation_split=0.,
             validation_data=None, shuffle=True, callbacks=None):
 
@@ -296,22 +302,39 @@ class MyDeepFM(MyBaseModel):
         return y_pred
 
 
-if __name__ == "__main__":
-    submit = pd.read_csv(ROOT_PATH + '/test_data.csv')[['userid', 'feedid']]
+def train_deepfm(params):
+    """
+
+    :param params:
+    :return:
+    """
+    # reading params
+    feed_embed_feat_nums = params['feed_embed_feat_nums']
+    FEA_FEED_LISTs = params['FEA_FEED_LISTs']
+    embedding_dims = params['embedding_dims']
+    dnn_hidden_units = params['dnn_hidden_units']
+    epochs = params['epochs']
+    k = params['k']
+    random_seed = params['random_seed']
+
+    submit = pd.read_csv(DATASET_PATH + f'/test_data_seed{random_seed}.csv')[['userid', 'feedid']]
+    # submit = datasets['test'].copy()[['userid', 'feedid']]
     for action in ACTION_LIST:
         print("train on " + action)
-        FEA_FEED_LIST = FEA_FEED_LISTs[action]
+        FEA_FEED_LIST = FEA_FEED_LISTs[action] + [f"embed{i}" for i in range(feed_embed_feat_nums[action])]
         USE_FEAT = ['userid', 'feedid', action] + FEA_FEED_LIST[1:]
-        train = pd.read_csv(ROOT_PATH + f'/train_data_for_{action}.csv')[USE_FEAT]
-        train = train.sample(frac=1, random_state=42).reset_index(drop=True)
+        train = pd.read_csv(DATASET_PATH + f'/train_data_for_{action}_seed{random_seed}.csv')[USE_FEAT]
+        # train = datasets[action]
+        train = train.sample(frac=1, random_state=random_seed).reset_index(drop=True)
         print("posi prop:")
-        print(sum((train[action]==1)*1)/train.shape[0])
-        test = pd.read_csv(ROOT_PATH + '/test_data.csv')[[i for i in USE_FEAT if i != action]]
+        print(sum((train[action] == 1)*1)/train.shape[0])
+        test = pd.read_csv(DATASET_PATH + f'/test_data_seed{random_seed}.csv')[[i for i in USE_FEAT if i != action]]
+        # test = datasets['test'].copy()
         target = [action]
         test[target[0]] = 0
         test = test[USE_FEAT]
         data = pd.concat((train, test)).reset_index(drop=True)
-        dense_features = ['videoplayseconds']
+        dense_features = ['videoplayseconds'] + [f"embed{i}" for i in range(feed_embed_feat_nums[action])]
         sparse_features = [i for i in USE_FEAT if i not in dense_features and i not in target]
 
         data[sparse_features] = data[sparse_features].fillna(-1)
@@ -331,13 +354,13 @@ if __name__ == "__main__":
         dnn_feature_columns = fixlen_feature_columns
         linear_feature_columns = fixlen_feature_columns
 
-        feature_names = get_feature_names(
-            linear_feature_columns + dnn_feature_columns)
+        feature_names = get_feature_names(linear_feature_columns + dnn_feature_columns)
 
         # 3.generate input data for model
         train, test = data.iloc[:train.shape[0]].reset_index(drop=True), data.iloc[train.shape[0]:].reset_index(drop=True)
         train_model_input = {name: train[name] for name in feature_names}
         test_model_input = {name: test[name] for name in feature_names}
+        train_labels = train[target]
 
         # 4.Define Model,train,predict and evaluate
         device = 'cpu'
@@ -345,18 +368,29 @@ if __name__ == "__main__":
         if use_cuda and torch.cuda.is_available():
             print('cuda ready...')
             device = 'cuda:0'
+        # epochs = {'read_comment': 2, 'like': 2, 'click_avatar': 2, 'forward': 2}
+        validation_split = 1 / k
+        pred_ans = None
+        for i in range(k):
+            print("k = %d" % (i + 1))
+            model = MyDeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
+                             dnn_hidden_unit=dnn_hidden_units[action],
+                             task='binary', l2_reg_embedding=1e-1, device=device)
+            # print(model)
 
-        model = MyDeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
-                         dnn_hidden_unit=dnn_hidden_units[action],
-                         task='binary', l2_reg_embedding=1e-1, device=device)
-        # print(model)
+            model.compile("adagrad", "binary_crossentropy", metrics=["binary_crossentropy", "auc"])
 
-        model.compile("adagrad", "binary_crossentropy", metrics=["binary_crossentropy", "auc"])
-
-        history = model.fit(train_model_input, train[target].values, batch_size=512, epochs=epochs[action], verbose=1,
-                            validation_split=0.2)
-        pred_ans = model.predict(test_model_input, 128)
-        submit[action] = pred_ans
+            history = model.fit(train_model_input, train_labels.values, batch_size=512, epochs=epochs[action],
+                                verbose=1, validation_split=validation_split)
+            # 切洗数据
+            train_model_input = shuffle_k_fold(train_model_input, k)
+            train_labels = shuffle_k_fold(train_labels, k)
+            if pred_ans is None:
+                pred_ans = model.predict(test_model_input, 128)
+            else:
+                pred_ans += model.predict(test_model_input, 128)
+        submit[action] = pred_ans / k
         torch.cuda.empty_cache()
     # 保存提交文件
-    submit.to_csv("./submit_advance_deepfm.csv", index=False)
+    submit.to_csv(RESULT_PATH + f"submit_advance_deepfm_seed{random_seed}.csv", index=False)
+    # return submit

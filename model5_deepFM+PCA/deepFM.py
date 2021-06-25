@@ -20,11 +20,23 @@ TEST_FILE = DATASET_PATH + "test_a.csv"
 # 初赛待预测行为列表
 ACTION_LIST = ["read_comment", "like", "click_avatar", "forward"]
 FEA_COLUMN_LIST = ["read_comment", "like", "click_avatar", "forward", "comment", "follow", "favorite"]
-FEA_FEED_LIST = ['feedid', 'authorid', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id', 'machine_tag_list',
-                 'manual_tag_list', 'machine_keyword_list']
+# FEA_FEED_LISTs = {'read_comment': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list', 'machine_keyword_list'],
+#                   'like': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list'],
+#                   'click_avatar': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list'],
+#                   'forward': ['feedid', 'authorid', 'device', 'videoplayseconds', 'bgm_song_id', 'bgm_singer_id',
+#                    'machine_tag_list', 'manual_tag_list', 'machine_keyword_list']}
+# embedding_dims = {'read_comment': 2, 'like': 2, 'click_avatar': 4, 'forward': 4}
+# dnn_hidden_units = {'read_comment': (512, 256, 128), 'like': (256, 128),
+#                     'click_avatar': (256, 128), 'forward': (512, 256)}
+# feed_embed_feat_num = 2
 # 负样本下采样比例(负样本:正样本)
-ACTION_SAMPLE_RATE = {"read_comment": 5, "like": 5, "click_avatar": 5, "forward": 10, "comment": 10, "follow": 10,
-                      "favorite": 10}
+# ACTION_SAMPLE_RATE = {"read_comment": 5, "like": 5, "click_avatar": 5, "forward": 10, "comment": 10, "follow": 10,
+#                       "favorite": 10}
+
+__all__ = ['train_deepfm']
 
 
 class MyBaseModel(BaseModel):
@@ -234,7 +246,7 @@ class MyBaseModel(BaseModel):
 class MyDeepFM(MyBaseModel):
     def __init__(self,
                  linear_feature_columns, dnn_feature_columns, use_fm=True,
-                 dnn_hidden_units=(256, 128),
+                 dnn_hidden_unit=(256, 128),
                  l2_reg_linear=0.00001, l2_reg_embedding=0.00001, l2_reg_dnn=0, init_std=0.0001, seed=1024,
                  dnn_dropout=0,
                  dnn_activation='relu', dnn_use_bn=False, task='binary', device='cpu', gpus=None):
@@ -245,16 +257,16 @@ class MyDeepFM(MyBaseModel):
 
         self.use_fm = use_fm
         self.use_dnn = len(dnn_feature_columns) > 0 and len(
-            dnn_hidden_units) > 0
+            dnn_hidden_unit) > 0
         if use_fm:
             self.fm = FM()
 
         if self.use_dnn:
-            self.dnn = DNN(self.compute_input_dim(dnn_feature_columns), dnn_hidden_units,
+            self.dnn = DNN(self.compute_input_dim(dnn_feature_columns), dnn_hidden_unit,
                            activation=dnn_activation, l2_reg=l2_reg_dnn, dropout_rate=dnn_dropout, use_bn=dnn_use_bn,
                            init_std=init_std, device=device)
             self.dnn_linear = nn.Linear(
-                dnn_hidden_units[-1], 1, bias=False).to(device)
+                dnn_hidden_unit[-1], 1, bias=False).to(device)
 
             self.add_regularization_weight(
                 filter(lambda x: 'weight' in x[0] and 'bn' not in x[0], self.dnn.named_parameters()), l2=l2_reg_dnn)
@@ -286,21 +298,38 @@ class MyDeepFM(MyBaseModel):
         return y_pred
 
 
-if __name__ == "__main__":
-    submit = pd.read_csv(ROOT_PATH + '/test_data.csv')[['userid', 'feedid']]
+def train_deepfm(datasets, params):
+    """
+
+    :param datasets:
+    :param params:
+    :return:
+    """
+    # reading params
+    feed_embed_feat_nums = params['feed_embed_feat_nums']
+    FEA_FEED_LISTs = params['FEA_FEED_LISTs']
+    embedding_dims = params['embedding_dims']
+    dnn_hidden_units = params['dnn_hidden_units']
+    epochs = params['epochs']
+
+    # submit = pd.read_csv(ROOT_PATH + '/test_data.csv')[['userid', 'feedid']]
+    submit = datasets['test'].copy()[['userid', 'feedid']]
     for action in ACTION_LIST:
         print("train on " + action)
+        FEA_FEED_LIST = FEA_FEED_LISTs[action] + [f"embed{i}" for i in range(feed_embed_feat_nums[action])]
         USE_FEAT = ['userid', 'feedid', action] + FEA_FEED_LIST[1:]
-        train = pd.read_csv(ROOT_PATH + f'/train_data_for_{action}.csv')[USE_FEAT]
+        # train = pd.read_csv(ROOT_PATH + f'/train_data_for_{action}.csv')[USE_FEAT]
+        train = datasets[action]
         train = train.sample(frac=1, random_state=42).reset_index(drop=True)
         print("posi prop:")
-        print(sum((train[action]==1)*1)/train.shape[0])
-        test = pd.read_csv(ROOT_PATH + '/test_data.csv')[[i for i in USE_FEAT if i != action]]
+        print(sum((train[action] == 1)*1)/train.shape[0])
+        # test = pd.read_csv(ROOT_PATH + '/test_data.csv')[[i for i in USE_FEAT if i != action]]
+        test = datasets['test'].copy()
         target = [action]
         test[target[0]] = 0
         test = test[USE_FEAT]
         data = pd.concat((train, test)).reset_index(drop=True)
-        dense_features = ['videoplayseconds']
+        dense_features = ['videoplayseconds'] + [f"embed{i}" for i in range(feed_embed_feat_nums[action])]
         sparse_features = [i for i in USE_FEAT if i not in dense_features and i not in target]
 
         data[sparse_features] = data[sparse_features].fillna(-1)
@@ -314,14 +343,13 @@ if __name__ == "__main__":
         data[dense_features] = mms.fit_transform(data[dense_features])
 
         # 2.count #unique features for each sparse field,and record dense feature field name
-        fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim=4)
+        fixlen_feature_columns = [SparseFeat(feat, data[feat].nunique(), embedding_dim=embedding_dims[action])
                                   for feat in sparse_features] + [DenseFeat(feat, 1, )
                                                                   for feat in dense_features]
         dnn_feature_columns = fixlen_feature_columns
         linear_feature_columns = fixlen_feature_columns
 
-        feature_names = get_feature_names(
-            linear_feature_columns + dnn_feature_columns)
+        feature_names = get_feature_names(linear_feature_columns + dnn_feature_columns)
 
         # 3.generate input data for model
         train, test = data.iloc[:train.shape[0]].reset_index(drop=True), data.iloc[train.shape[0]:].reset_index(drop=True)
@@ -334,10 +362,11 @@ if __name__ == "__main__":
         if use_cuda and torch.cuda.is_available():
             print('cuda ready...')
             device = 'cuda:0'
-        epochs = {'read_comment': 3, 'like': 2, 'click_avatar': 2, 'forward': 2}
+        # epochs = {'read_comment': 2, 'like': 2, 'click_avatar': 2, 'forward': 2}
 
         model = MyDeepFM(linear_feature_columns=linear_feature_columns, dnn_feature_columns=dnn_feature_columns,
-                       task='binary', l2_reg_embedding=1e-1, device=device)
+                         dnn_hidden_unit=dnn_hidden_units[action],
+                         task='binary', l2_reg_embedding=1e-1, device=device)
         # print(model)
 
         model.compile("adagrad", "binary_crossentropy", metrics=["binary_crossentropy", "auc"])
@@ -348,4 +377,5 @@ if __name__ == "__main__":
         submit[action] = pred_ans
         torch.cuda.empty_cache()
     # 保存提交文件
-    submit.to_csv("./submit_base_deepfm.csv", index=False)
+    submit.to_csv("./submit_advance_deepfm.csv", index=False)
+    # return submit

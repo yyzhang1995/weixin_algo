@@ -1,8 +1,10 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from sklearn.decomposition import PCA
 
-__all__ = ['process_machine_tag_list', 'process_manual_tag_list', 'process_machine_keyword', 'process_manual_keyword']
+__all__ = ['process_machine_tag_list', 'process_manual_tag_list', 'process_machine_keyword', 'process_manual_keyword',
+           'process_embed']
 
 
 def process_machine_tag_list(data):
@@ -69,3 +71,21 @@ def process_manual_keyword(data):
         except AttributeError:
             manual_keyword[i] = 0
     data['manual_keyword_list'] = manual_keyword
+
+
+def process_embed(train):
+    feed_embed_array = np.zeros((train.shape[0], 512))
+    print("processing feed embeddings")
+    for i in tqdm(range(train.shape[0])):
+        x = train.loc[i, 'feed_embedding']
+        if x != np.nan and x != '':
+            y = [float(i) for i in str(x).strip().split(" ")]
+        else:
+            y = np.zeros((512,)).tolist()
+        feed_embed_array[i] += y
+
+    pca = PCA(n_components=32, whiten=True)
+    feed_embed_pca = pca.fit_transform(feed_embed_array)
+    temp = pd.DataFrame(columns=[f"embed{i}" for i in range(32)], data=feed_embed_pca)
+    feed_embed_pca = pd.concat((train[['feedid']], temp), axis=1)
+    return feed_embed_pca
